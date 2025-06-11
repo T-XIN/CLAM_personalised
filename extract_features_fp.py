@@ -83,10 +83,10 @@ if __name__ == '__main__':
 	loader_kwargs = {'num_workers': 8, 'pin_memory': True} if device.type == "cuda" else {}
 
 	for bag_candidate_idx in tqdm(range(total)):
-		slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
+		slide_id = os.path.basename(bags_dataset[bag_candidate_idx].split(args.slide_ext)[0])
 		bag_name = slide_id+'.h5'
 		h5_file_path = os.path.join(args.data_h5_dir, 'patches', bag_name)
-		slide_file_path = os.path.join(args.data_slide_dir, slide_id+args.slide_ext)
+		slide_file_path = bags_dataset[bag_candidate_idx]
 		print('\nprogress: {}/{}'.format(bag_candidate_idx, total))
 		print(slide_id)
 
