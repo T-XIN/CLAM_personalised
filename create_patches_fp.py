@@ -58,15 +58,26 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 				  stitch= False, 
 				  patch = False, auto_skip=True, process_list = None):
 
+	# Load the original metadata CSV
+	df_meta = pd.read_csv('/home/campus.ncl.ac.uk/ntx/workspace/ntx/MSCPT/tcga_lung.csv')
+	# Filter to LUAD cases with level0_mag = 40
+	df_meta = df_meta[(df_meta['OncoTreeCode'] == 'LUAD') & (df_meta['level0_mag'] == 40)]
+	# Extract valid slide IDs (assumed to be stored in a column like 'slide_id')
+	valid_slide_ids = set(df_meta['slide_id'].astype(str).str.strip())
+
 	# Recursively find all .svs files inside subdirectories of 'source'
 	slides = []
 	for root, dirs, files in os.walk(source):
 		for file in files:
 			if file.lower().endswith('.svs'):
-				slides.append(os.path.join(root, file))
+				slide_path = os.path.join(root, file)
+				slide_filename = os.path.splitext(os.path.basename(slide_path))[0]  # Extract slide ID
+				if slide_filename in valid_slide_ids:
+					slides.append(slide_path)
 
 	slides = sorted(slides)
-	slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
+
+	# Proceed with initialization
 	if process_list is None:
 		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
 	
