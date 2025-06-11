@@ -57,10 +57,15 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 				  seg = False, save_mask = True, 
 				  stitch= False, 
 				  patch = False, auto_skip=True, process_list = None):
-	
 
+	# Recursively find all .svs files inside subdirectories of 'source'
+	slides = []
+	for root, dirs, files in os.walk(source):
+		for file in files:
+			if file.lower().endswith('.svs'):
+				slides.append(os.path.join(root, file))
 
-	slides = sorted(os.listdir(source))
+	slides = sorted(slides)
 	slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
 	if process_list is None:
 		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
@@ -95,7 +100,8 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 		print('processing {}'.format(slide))
 		
 		df.loc[idx, 'process'] = 0
-		slide_id, _ = os.path.splitext(slide)
+		# Extract the filename without extension
+		slide_id, _ = os.path.splitext(os.path.basename(slide))
 
 		if auto_skip and os.path.isfile(os.path.join(patch_save_dir, slide_id + '.h5')):
 			print('{} already exist in destination location, skipped'.format(slide_id))
