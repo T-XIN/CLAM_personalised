@@ -60,8 +60,8 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 
 	# Load the original metadata CSV
 	df_meta = pd.read_csv('/home/campus.ncl.ac.uk/ntx/workspace/ntx/MSCPT/tcga_lung.csv')
-	# Filter to LUAD cases with level0_mag = 40
-	df_meta = df_meta[(df_meta['OncoTreeCode'] == 'LUAD') & (df_meta['level0_mag'] == 40)]
+	# Filter to LUAD cases with level0_mag = 20
+	df_meta = df_meta[(df_meta['OncoTreeCode'] == 'LUAD') & (df_meta['level0_mag'] == 20)]
 	# Extract valid slide IDs (assumed to be stored in a column like 'slide_id')
 	valid_slide_ids = set(df_meta['slide_id'].astype(str).str.strip())
 
