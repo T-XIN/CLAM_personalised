@@ -58,7 +58,7 @@ def load_ctranspath_clip(model_name, ckpt_path, img_size = 224, return_trsforms 
     elif model_name == 'conch':
         from conch.open_clip_custom import create_model_from_pretrained
         model, trsforms = create_model_from_pretrained("conch_ViT-B-16", 
-                                checkpoint_path="path/to/weights", 
+                                checkpoint_path="checkpoints/conch/pytorch_model.bin",
                                 force_image_size=img_size)
         if return_trsforms:
             return model, trsforms
@@ -129,7 +129,7 @@ def extract_features(df, model_name, model, wsi_ext = '.svs', pt_path='', device
         pt_file_path = os.path.join(pt_path, df['project_id'], model_name+'_5', slide_id + '.pt')
     else:
         wsi_path = os.path.join(wsi_source, df['project_id'].split('-')[-1], slide_id + wsi_ext)
-        pt_file_path = os.path.join(pt_path, df['project_id'].split('-')[-1], model_name+'_5', slide_id + '.pt')
+        pt_file_path = os.path.join(pt_path, slide_id + '.pt')
     wsi = openslide.open_slide(wsi_path)
     pt_file_path = pt_file_path.replace('clip', 'ViT-B-16')
     features = torch.load(pt_file_path).to(device)
@@ -226,19 +226,19 @@ if __name__ == '__main__':
     wsi_source = args.wsi_source
     ckpt_path = args.ckpt_path
     device = args.device 
-    prompt_file = os.path.join(args.gpt_data,f'{args.dataset_name.upper()}_select_pic.json')
+    prompt_file = os.path.join(args.gpt_data,f'{args.dataset_name}_select_pic.json')
     with open(prompt_file, 'r') as pf: 
         prompts = json.load(pf)
 
     model, trsforms = load_ctranspath_clip(model_name=args.model_name,
                                 ckpt_path=ckpt_path, 
-                                img_size = 224, 
+                                img_size = 256,
                                 return_trsforms = True)
     model.to(args.device)
     # Load tokenizer
     tokenizer = load_pretrained_tokenizer(args.model_name)
     all_weights = []
-    prompts = [prompts[str(prompt_idx)] for prompt_idx in range(100)]
+    prompts = [prompts[str(prompt_idx)] for prompt_idx in range(len(prompts))]
     for prompt in prompts:
         # Your code here
         classnames = prompt['classnames']
@@ -273,7 +273,7 @@ if __name__ == '__main__':
         split_list = project_dic[args.dataset_name]
     else:
         split_list = [args.split]
-    args.save_dir = os.path.join(args.save_dir, args.model_name, args.dataset_name, 'K_100')
+    args.save_dir = os.path.join(args.save_dir, args.model_name, args.dataset_name, 'K_30')
     for args.split in split_list:
         df = pd.read_csv(csv_path)
         if args.split == 'KIRC':
@@ -287,7 +287,7 @@ if __name__ == '__main__':
         elif args.split == 'LUSC':
             df = df[df['project_id']=='TCGA-LUSC']
         assert 'level0_mag' in df.columns, 'level0_mag column missing'
-        h5_source = os.path.join(args.h5_source, args.split + '_5/patches')
+        # h5_source = os.path.join(args.h5_source, args.split + '_5/patches')
         df = df.apply(lambda x: file_exists(x, h5_source), axis=1)
         df['has_h5'].value_counts()
         # df['has_slide'] = df['slide_id'].apply(lambda x: file_exists(x, wsi_source, ext='.svs'))
@@ -297,7 +297,7 @@ if __name__ == '__main__':
         assert df['has_h5'].sum() == len(df['has_h5'])
         # assert df['has_slide'].sum() == len(df['has_slide'])
         df['pred'] = np.nan 
-        df = df.apply(lambda x: compute_patch_args(x, target_mag = 5, patch_size = 256), axis=1)
+        df = df.apply(lambda x: compute_patch_args(x, target_mag = 5, patch_size = 512), axis=1)  # set patch_size as 256 or 512
         if not os.path.exists(args.save_dir):
             os.makedirs(args.save_dir)
 
@@ -314,19 +314,37 @@ if __name__ == '__main__':
                                                                                 pt_path=args.pt_path,
                                                                                 model=model, 
                                                                                 device=device)
-            logits = text_feats @ img_feats.T
+            logits = text_feats @ img_feats.T  # [num_classes, num_patches]
             logits = logits.cpu()
+
+            # Predict class by summing top-k logits per class
             if args.top_k > img_feats.shape[0]:
-                topk_values, topk_indices = torch.topk(logits, img_feats.shape[0], dim=1)
+                top_k = img_feats.shape[0]
             else:
-                topk_values, topk_indices = torch.topk(logits, args.top_k, dim=1)
-            pred = topk_values.sum(dim=1).argmax().cpu().item()
-            select_id = topk_indices.flatten().cpu().numpy()
+                top_k = args.top_k
+
+            # Sum top-k logits across each class to determine predicted class
+            _, topk_indices_all = torch.topk(logits, top_k, dim=1)
+            topk_values_all = torch.gather(logits, 1, topk_indices_all)
+            pred = topk_values_all.sum(dim=1).argmax().cpu().item()
+
+            # Select top-k patches for the predicted class only
+            pred_logits = logits[pred]  # [num_patches]
+            topk_values, topk_indices = torch.topk(pred_logits, top_k, dim=0)
+
+            # Update prediction status
+            df.loc[idx, 'pred'] = 1 if pred == category else 0
+
+            # Retrieve patch coordinates and scores
+            select_id = topk_indices.cpu().numpy()
             coord = coords[select_id]
-            scores = logits[pred][select_id].numpy()
-            df.loc[idx, 'pred'] = 1 if pred == category else 0  # 进行赋值
-            for idx, (x,y) in enumerate(coord):
-                big_img = wsi.read_region((x,y), patch_level, (patch_size, patch_size)).convert('RGB')
-                big_img = big_img.resize((224,224))
-                big_img.save(os.path.join(save_path, f"score_{scores[idx]:.4f}_{idx}_{x}_{y}.png"))
+            scores = topk_values.cpu().numpy()
+
+            # Save the top-k patch images from predicted class
+            for i, (x, y) in enumerate(coord):
+                big_img = wsi.read_region((x, y), patch_level, (patch_size, patch_size)).convert('RGB')
+                big_img = big_img.resize((256, 256))
+                big_img.save(os.path.join(save_path, f"score_{scores[i]:.4f}_{i}_{x}_{y}.png"))
+
+        # Save final CSV result
         df.to_csv(f'./{args.split}_result_{args.model_name}.csv', index=False)
